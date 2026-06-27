@@ -251,13 +251,7 @@
     <div class="key-status unset" id="keyStatus">키 미설정</div>
     <button class="btn-xs" style="margin-top:6px;width:100%;" id="clearKeyBtn">키 삭제</button>
 
-    <div class="key-label" style="margin-top:14px;">Google Maps API 키</div>
-    <div class="key-input-row">
-      <input type="password" class="key-input" id="gmapsKeyInput" placeholder="AIza..." autocomplete="off" />
-      <button class="btn-xs" id="saveGmapsKeyBtn">저장</button>
-    </div>
-    <div class="key-status unset" id="gmapsKeyStatus">키 미설정</div>
-    <button class="btn-xs" style="margin-top:6px;width:100%;" id="clearGmapsKeyBtn">키 삭제</button>
+    <div class="key-label" style="margin-top:14px;"></div>
   </div>
 </div>
 
@@ -365,17 +359,22 @@ Enroute FIR: FIR 진입 ACTM ~ FIR 이탈 ACTM +2h
 노탐 내용 중 해당 유효시간범위에 포함되는 모든 유효한 내용 위주로 PACKAGE 1,2,3를 정리해줘. (RW, TWY,VOR,VORDME,VORTAC 등 Navigation 시설의 CLOSED, U/S, DECOMMISSIONED, UNSERVICEABLE, OUT, shut down, Not working등 문제는 중요한 내용이니까 빠뜨리지 말것)
 모든공항의 이름과 FIR의 이름을 같이 괄호안에 표시해줘.`;
 
-const ROUTE_SYSTEM = `다음 지침에 따라 구글맵 디스플레이를 위한 HTML 파일을 만들어준다. (HTML 파일 생성 시 180도 경계 처리(dispLon), 태평양 중앙 초기뷰, 레이어 토글 버튼 등 주의요망)
+const ROUTE_SYSTEM = `다음 지침에 따라 Leaflet.js 기반의 지도 HTML 파일을 만들어준다.
+API 키가 필요없는 Leaflet.js (CDN: https://unpkg.com/leaflet@1.9.4/dist/leaflet.js) 와 OpenStreetMap 타일을 사용한다.
 파일을 올려주면 말(프롬프트 요청)이 없더라도 바로 위의 요구사항을 만들어 준다.
 올려준 비행계획서 파일은 순서대로 CFP PLAN, DISPATCH RELEASE INFORMATION, WEATHER BRIEFING, KOREAN AIR NOTAM PACKAGE 1, 2, 3 그리고 CFP PLAN 이 한번 더 나온다.
-첫번째로 CFP PLAN 의 waypoints를 흰색핀으로 만들어 모두 순서대로 연결한 항로를 녹색으로 표시한다.
+첫번째로 CFP PLAN 의 waypoints를 흰색 원형 마커로 만들어 모두 순서대로 연결한 항로를 녹색 선으로 표시한다.
 zt 밑의 actm 은 이륙 후 waypoint 도착 시간이고, ACTM 이랑 Z time 을 혼동하지 않도록 주의.
 출발시간 + ACTM = 도착시간.
+태평양 노선의 경우 180도 경계를 고려하여 경도를 보정(dispLon)하여 선이 끊기지 않도록 처리한다.
+지도 초기 뷰는 항로 전체가 보이도록 fitBounds로 자동 설정한다.
 FIR 노탐 유효시간은 FIR 진입 예상시간 ~ 이탈 예상시간 + 2h 으로 한다.
 KOREAN AIR NOTAM PACKAGE 3의 내용 중 유효시간 안에 포함되는 정보만을 사용한다.
-Notam Package 3에 나오는 유효한 정보를 지도상에 붉은색으로 표시해주는데, 위치가 있다면 해당위치에 표시하고, 위치를 알수없다면 해당 지역에 핀으로 표시해준다.
-Notam Package 3에 좌표를 포함하는 정보가 있다면 역시 붉은 영역으로 표시한다. (no ke route 라도 표시할 수 있다면 표시해줘).
-모든 노탐표시에 커서가 위치하면 해당 노탐내용을 보여준다.
+Notam Package 3에 나오는 유효한 정보를 지도상에 붉은색으로 표시해주는데, 위치가 있다면 해당위치에 빨간 마커로 표시하고, 위치를 알수없다면 해당 지역 중심에 핀으로 표시해준다.
+Notam Package 3에 좌표 또는 반경 정보를 포함하는 정보가 있다면 빨간 원(circle) 또는 폴리곤으로 표시한다.
+모든 마커와 영역에 클릭 또는 hover 시 해당 노탐 내용을 팝업으로 보여준다.
+화면 상단에 항로(Route) 레이어와 노탐(NOTAM) 레이어를 켜고 끌 수 있는 토글 버튼을 만든다.
+좌측 하단 또는 상단에 편명, 출발지→도착지, ETD, ETA, 비행시간 정보를 표시하는 범례 박스를 만든다.
 반드시 완전히 동작하는 단일 HTML 파일로만 출력하고, 설명 텍스트나 마크다운 없이 HTML 코드만 반환한다.`;
 
 const API_KEY_STORE  = 'hwangsbrief_api_key';
@@ -389,18 +388,14 @@ let mapText   = '';
 const el = id => document.getElementById(id);
 
 /* ── key ── */
-const GMAPS_KEY_STORE = 'hwangsbrief_gmaps_key';
+const GMAPS_KEY_STORE = 'hwangsbrief_gmaps_key'; // 하위 호환용, 더 이상 사용 안 함
 
 function updateKeyStatus(isSet) {
   const s = el('keyStatus');
   s.textContent = isSet ? '✓ 키 저장됨' : '키 미설정';
   s.className = 'key-status ' + (isSet ? 'set' : 'unset');
 }
-function updateGmapsKeyStatus(isSet) {
-  const s = el('gmapsKeyStatus');
-  s.textContent = isSet ? '✓ 키 저장됨' : '키 미설정';
-  s.className = 'key-status ' + (isSet ? 'set' : 'unset');
-}
+function updateGmapsKeyStatus() {} // 제거됨, 하위 호환용
 el('saveKeyBtn').addEventListener('click', () => {
   const v = el('apiKeyInput').value.trim();
   if (!v) return;
@@ -411,17 +406,6 @@ el('saveKeyBtn').addEventListener('click', () => {
 el('clearKeyBtn').addEventListener('click', () => {
   localStorage.removeItem(API_KEY_STORE);
   updateKeyStatus(false);
-});
-el('saveGmapsKeyBtn').addEventListener('click', () => {
-  const v = el('gmapsKeyInput').value.trim();
-  if (!v) return;
-  localStorage.setItem(GMAPS_KEY_STORE, v);
-  el('gmapsKeyInput').value = '';
-  updateGmapsKeyStatus(true);
-});
-el('clearGmapsKeyBtn').addEventListener('click', () => {
-  localStorage.removeItem(GMAPS_KEY_STORE);
-  updateGmapsKeyStatus(false);
 });
 
 /* ── file ── */
@@ -610,14 +594,9 @@ el('generateMapBtn').addEventListener('click', async () => {
   mapText = '';
 
   try {
-    const gmapsKey = localStorage.getItem(GMAPS_KEY_STORE) || '';
-    const mapPrompt = '다음 비행계획서를 분석하여 구글맵 HTML 파일을 만들어주세요. Google Maps API 키는 ' + (gmapsKey || 'YOUR_API_KEY') + ' 를 사용하세요.';
+    const mapPrompt = '다음 비행계획서를 분석하여 Leaflet.js 기반 지도 HTML 파일을 만들어주세요.';
     mapText = await callAPI(ROUTE_SYSTEM, makeMapContent(mapPrompt), 8192);
     mapText = mapText.replace(/^```(?:html)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
-    if (gmapsKey) {
-      mapText = mapText.replace(/YOUR_API_KEY/g, gmapsKey);
-      mapText = mapText.replace(/key=YOUR_KEY/g, 'key=' + gmapsKey);
-    }
     el('mapOutput').textContent = mapText.slice(0, 400) + (mapText.length > 400 ? '\n\n... (HTML 다운로드 버튼 이용)' : '');
     el('mapCard').style.display = 'block';
     endProgress(true);
@@ -721,7 +700,6 @@ el('resetBtn').addEventListener('click', () => {
 
 /* ── init ── */
 updateKeyStatus(!!localStorage.getItem(API_KEY_STORE));
-updateGmapsKeyStatus(!!localStorage.getItem(GMAPS_KEY_STORE));
 try { history = JSON.parse(localStorage.getItem(ARCHIVE_STORE) || '[]'); } catch { history = []; }
 renderArchive();
 </script>
