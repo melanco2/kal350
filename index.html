@@ -501,14 +501,17 @@ el('generateMapBtn').addEventListener('click', async () => {
       if (fixed) { mapData = fixed; }
       else throw parseErr;
     }
-    renderMap(mapData);
     el('mapCard').style.display = 'block';
-    // 디버그: 웨이포인트 수 확인
-    const wpCount = (mapData.waypoints || []).length;
-    const ntCount = (mapData.notams || []).length;
-    el('mapDebug').textContent = '웨이포인트: ' + wpCount + '개 | 노탐: ' + ntCount + '개' +
-      (wpCount > 0 ? ' | 첫점: ' + JSON.stringify(mapData.waypoints[0]) : ' | ⚠️ 웨이포인트 없음');
-    el('mapDebug').style.display = 'block';
+    // 카드가 보인 후 Leaflet 초기화 (컨테이너 크기 측정 필요)
+    setTimeout(() => {
+      renderMap(mapData);
+      // 디버그: 웨이포인트 수 확인
+      const wpCount = (mapData.waypoints || []).length;
+      const ntCount = (mapData.notams || []).length;
+      el('mapDebug').textContent = '웨이포인트: ' + wpCount + '개 | 노탐: ' + ntCount + '개' +
+        (wpCount > 0 ? ' | 첫점: ' + JSON.stringify(mapData.waypoints[0]) : ' | ⚠️ 웨이포인트 없음');
+      el('mapDebug').style.display = 'block';
+    }, 50);
   } catch(e) { showError('지도 생성 오류: ' + e.message + ' (JSON 파싱 실패일 수 있어요)'); }
   finally { endProgress(); }
 });
@@ -628,7 +631,11 @@ function renderArchive() {
       el('briefOutput').textContent = h.brief;
       el('briefCard').style.display = 'block';
       if (h.mapData) {
-        try { mapData = JSON.parse(h.mapData); renderMap(mapData); el('mapCard').style.display = 'block'; } catch(e) {}
+        try {
+          mapData = JSON.parse(h.mapData);
+          el('mapCard').style.display = 'block';
+          setTimeout(() => renderMap(mapData), 50);
+        } catch(e) {}
       }
       window.scrollTo({ top: 0, behavior: 'smooth' });
     });
