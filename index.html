@@ -368,13 +368,13 @@ el('fileClear').addEventListener('click', clearFile);
 
 /* ── API ── */
 function makeContent(prompt, useFullFile) {
-  const text = useFullFile ? fileData.textContent : extractMapSection(fileData.textContent);
   if (fileData.type === 'pdf') {
     return [
       { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: fileData.pdfBase64 } },
       { type: 'text', text: prompt }
     ];
   }
+  const text = useFullFile ? fileData.textContent : extractMapSection(fileData.textContent);
   return prompt + '\n\n파일명: ' + fileData.name + '\n\n' + text;
 }
 
