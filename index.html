@@ -250,6 +250,14 @@
     </div>
     <div class="key-status unset" id="keyStatus">키 미설정</div>
     <button class="btn-xs" style="margin-top:6px;width:100%;" id="clearKeyBtn">키 삭제</button>
+
+    <div class="key-label" style="margin-top:14px;">Google Maps API 키</div>
+    <div class="key-input-row">
+      <input type="password" class="key-input" id="gmapsKeyInput" placeholder="AIza..." autocomplete="off" />
+      <button class="btn-xs" id="saveGmapsKeyBtn">저장</button>
+    </div>
+    <div class="key-status unset" id="gmapsKeyStatus">키 미설정</div>
+    <button class="btn-xs" style="margin-top:6px;width:100%;" id="clearGmapsKeyBtn">키 삭제</button>
   </div>
 </div>
 
@@ -382,8 +390,15 @@ let mapText   = '';
 const el = id => document.getElementById(id);
 
 /* ── key ── */
+const GMAPS_KEY_STORE = 'hwangsbrief_gmaps_key';
+
 function updateKeyStatus(isSet) {
   const s = el('keyStatus');
+  s.textContent = isSet ? '✓ 키 저장됨' : '키 미설정';
+  s.className = 'key-status ' + (isSet ? 'set' : 'unset');
+}
+function updateGmapsKeyStatus(isSet) {
+  const s = el('gmapsKeyStatus');
   s.textContent = isSet ? '✓ 키 저장됨' : '키 미설정';
   s.className = 'key-status ' + (isSet ? 'set' : 'unset');
 }
@@ -397,6 +412,17 @@ el('saveKeyBtn').addEventListener('click', () => {
 el('clearKeyBtn').addEventListener('click', () => {
   localStorage.removeItem(API_KEY_STORE);
   updateKeyStatus(false);
+});
+el('saveGmapsKeyBtn').addEventListener('click', () => {
+  const v = el('gmapsKeyInput').value.trim();
+  if (!v) return;
+  localStorage.setItem(GMAPS_KEY_STORE, v);
+  el('gmapsKeyInput').value = '';
+  updateGmapsKeyStatus(true);
+});
+el('clearGmapsKeyBtn').addEventListener('click', () => {
+  localStorage.removeItem(GMAPS_KEY_STORE);
+  updateGmapsKeyStatus(false);
 });
 
 /* ── file ── */
@@ -508,8 +534,15 @@ el('generateBtn').addEventListener('click', async () => {
     setProgress(1, 'done'); setProgress(2, 'active');
 
     // Step 2: map HTML
-    mapText = await callAPI(ROUTE_SYSTEM, makeUserContent('다음 비행계획서를 분석하여 구글맵 HTML 파일을 만들어주세요.'));
+    const gmapsKey = localStorage.getItem(GMAPS_KEY_STORE) || '';
+    const mapPrompt = '다음 비행계획서를 분석하여 구글맵 HTML 파일을 만들어주세요. Google Maps API 키는 ' + (gmapsKey ? gmapsKey : 'YOUR_API_KEY') + ' 를 사용하세요.';
+    mapText = await callAPI(ROUTE_SYSTEM, makeUserContent(mapPrompt));
     mapText = mapText.replace(/^```(?:html)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+    // 혹시 AI가 플레이스홀더를 사용했을 경우 실제 키로 교체
+    if (gmapsKey) {
+      mapText = mapText.replace(/YOUR_API_KEY/g, gmapsKey);
+      mapText = mapText.replace(/key=YOUR_KEY/g, 'key=' + gmapsKey);
+    }
     setProgress(2, 'done');
 
     // Show results
@@ -625,6 +658,7 @@ el('resetBtn').addEventListener('click', () => {
 
 /* ── init ── */
 updateKeyStatus(!!localStorage.getItem(API_KEY_STORE));
+updateGmapsKeyStatus(!!localStorage.getItem(GMAPS_KEY_STORE));
 try { history = JSON.parse(localStorage.getItem(ARCHIVE_STORE) || '[]'); } catch { history = []; }
 renderArchive();
 </script>
