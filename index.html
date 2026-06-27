@@ -285,21 +285,20 @@
 
     <div class="gen-row">
       <button class="btn-ghost" id="resetBtn">↺ 초기화</button>
-      <button class="btn-main" id="generateBtn" disabled>▷ 브리핑 + 지도 생성</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn-main" id="generateBriefBtn" disabled style="background:#1d4ed8;">📋 브리핑 생성</button>
+        <button class="btn-main" id="generateMapBtn" disabled style="background:#15803d;">🗺 지도 생성</button>
+      </div>
     </div>
 
     <div class="error-box" id="errorBox" style="display:none;"></div>
 
     <!-- Progress -->
     <div class="progress-box" id="progressBox" style="display:none;">
-      <div class="progress-title">생성 중...</div>
+      <div class="progress-title" id="progressTitle">생성 중...</div>
       <div class="progress-item">
         <span class="progress-icon" id="pi1">⏳</span>
-        <span class="progress-label" id="pl1">비행 브리핑 작성 중</span>
-      </div>
-      <div class="progress-item">
-        <span class="progress-icon" id="pi2">○</span>
-        <span class="progress-label" id="pl2">루트 · 노탐 지도 HTML 생성 중</span>
+        <span class="progress-label" id="pl1">작업 진행 중</span>
       </div>
     </div>
 
@@ -431,7 +430,10 @@ function formatBytes(n) {
   if (n < 1048576) return (n/1024).toFixed(1) + ' KB';
   return (n/1048576).toFixed(1) + ' MB';
 }
-function setGenEnabled() { el('generateBtn').disabled = !fileData; }
+function setGenEnabled() {
+  el('generateBriefBtn').disabled = !fileData;
+  el('generateMapBtn').disabled = !fileData;
+}
 
 function showFileLoaded(name, size) {
   el('uploadZone').style.display = 'none';
@@ -477,7 +479,7 @@ function setProgress(step, state) {
 }
 
 /* ── API call ── */
-async function callAPI(system, userContent) {
+async function callAPI(system, userContent, maxTokens) {
   const apiKey = localStorage.getItem(API_KEY_STORE);
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -490,7 +492,7 @@ async function callAPI(system, userContent) {
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
-      max_tokens: 8192,
+      max_tokens: maxTokens || 8192,
       system,
       messages: [{ role: 'user', content: userContent }],
     }),
@@ -512,55 +514,116 @@ function makeUserContent(prompt) {
   return prompt + '\n\n파일명: ' + fileData.name + '\n\n' + fileData.textContent;
 }
 
-/* ── generate ── */
-el('generateBtn').addEventListener('click', async () => {
+// 지도 생성용: CFP PLAN 헤더(출발시간 파악) + NOTAM PACKAGE 3만 추출
+function makeMapContent(prompt) {
+  if (fileData.type === 'pdf') {
+    // PDF는 분리 불가 — 전체 전송
+    return [
+      { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: fileData.pdfBase64 } },
+      { type: 'text', text: prompt }
+    ];
+  }
+
+  const text = fileData.textContent;
+
+  // CFP PLAN 앞부분 추출 (웨이포인트 목록 포함, 첫 2000자 정도)
+  const cfpMatch = text.match(/CFP\s*PLAN[\s\S]{0,3000}/i);
+  const cfpSection = cfpMatch ? cfpMatch[0] : text.slice(0, 2000);
+
+  // NOTAM PACKAGE 3 추출
+  // "PACKAGE 3" 또는 "PKG 3" 이후부터 다음 섹션(CFP PLAN 재등장 또는 파일 끝)까지
+  const pkg3Patterns = [
+    /NOTAM\s*PACKAGE\s*(?:NO\.?\s*)?3[\s\S]*?(?=NOTAM\s*PACKAGE\s*(?:NO\.?\s*)?[^3]|CFP\s*PLAN|$)/i,
+    /PACKAGE\s*3[\s\S]*?(?=PACKAGE\s*[^3\d]|CFP\s*PLAN|$)/i,
+    /PKG\s*3[\s\S]*?(?=PKG\s*[^3\d]|CFP\s*PLAN|$)/i,
+  ];
+
+  let pkg3Section = '';
+  for (const pat of pkg3Patterns) {
+    const m = text.match(pat);
+    if (m && m[0].length > 100) { pkg3Section = m[0]; break; }
+  }
+
+  // 못 찾으면 전체의 마지막 1/3 구간 사용 (PKG3는 보통 파일 후반부)
+  if (!pkg3Section) {
+    const start = Math.floor(text.length * 0.6);
+    pkg3Section = '[NOTAM PACKAGE 3 자동추출 실패 — 후반부 원문]\n' + text.slice(start);
+  }
+
+  const combined = '[CFP PLAN 요약]\n' + cfpSection +
+                   '\n\n[NOTAM PACKAGE 3]\n' + pkg3Section;
+
+  return prompt + '\n\n파일명: ' + fileData.name + '\n\n' + combined;
+}
+
+/* ── generate helpers ── */
+function setBtnsDisabled(disabled) {
+  el('generateBriefBtn').disabled = disabled || !fileData;
+  el('generateMapBtn').disabled = disabled || !fileData;
+}
+
+function startProgress(label) {
+  el('errorBox').style.display = 'none';
+  el('progressBox').style.display = 'block';
+  el('progressTitle').textContent = label;
+  el('pi1').textContent = '⏳';
+  el('pl1').textContent = label;
+  el('pl1').className = 'progress-label active';
+  setBtnsDisabled(true);
+}
+
+function endProgress(success) {
+  el('pi1').textContent = success ? '✅' : '❌';
+  el('pl1').className = 'progress-label ' + (success ? 'done' : '');
+  setTimeout(() => { el('progressBox').style.display = 'none'; }, 1200);
+  setBtnsDisabled(false);
+  setGenEnabled();
+}
+
+/* ── briefing ── */
+el('generateBriefBtn').addEventListener('click', async () => {
   if (!fileData) return;
   const apiKey = localStorage.getItem(API_KEY_STORE);
-  if (!apiKey) { showError('먼저 사이드바에서 API 키를 입력해주세요.'); return; }
+  if (!apiKey) { showError('사이드바에서 Anthropic API 키를 먼저 입력해주세요.'); return; }
 
-  el('errorBox').style.display = 'none';
-  el('briefCard').style.display = 'none';
-  el('mapCard').style.display = 'none';
-  el('progressBox').style.display = 'block';
-  el('generateBtn').disabled = true;
-  el('generateBtn').textContent = '생성 중...';
-  setProgress(1, 'active'); setProgress(2, 'waiting');
-
-  briefText = ''; mapText = '';
+  startProgress('비행 브리핑 작성 중...');
+  briefText = '';
 
   try {
-    // Step 1: briefing
-    briefText = await callAPI(BRIEFING_SYSTEM, makeUserContent('다음 원문을 분석하여 운항 브리핑을 작성해주세요.'));
-    setProgress(1, 'done'); setProgress(2, 'active');
+    briefText = await callAPI(BRIEFING_SYSTEM, makeUserContent('다음 원문을 분석하여 운항 브리핑을 작성해주세요.'), 16000);
+    el('briefOutput').textContent = briefText;
+    el('briefCard').style.display = 'block';
+    endProgress(true);
+  } catch(e) {
+    endProgress(false);
+    showError('브리핑 생성 오류: ' + e.message);
+  }
+});
 
-    // Step 2: map HTML
+/* ── map ── */
+el('generateMapBtn').addEventListener('click', async () => {
+  if (!fileData) return;
+  const apiKey = localStorage.getItem(API_KEY_STORE);
+  if (!apiKey) { showError('사이드바에서 Anthropic API 키를 먼저 입력해주세요.'); return; }
+
+  startProgress('루트 · 노탐 지도 HTML 생성 중...');
+  mapText = '';
+
+  try {
     const gmapsKey = localStorage.getItem(GMAPS_KEY_STORE) || '';
-    const mapPrompt = '다음 비행계획서를 분석하여 구글맵 HTML 파일을 만들어주세요. Google Maps API 키는 ' + (gmapsKey ? gmapsKey : 'YOUR_API_KEY') + ' 를 사용하세요.';
-    mapText = await callAPI(ROUTE_SYSTEM, makeUserContent(mapPrompt));
+    const mapPrompt = '다음 비행계획서를 분석하여 구글맵 HTML 파일을 만들어주세요. Google Maps API 키는 ' + (gmapsKey || 'YOUR_API_KEY') + ' 를 사용하세요.';
+    mapText = await callAPI(ROUTE_SYSTEM, makeMapContent(mapPrompt), 8192);
     mapText = mapText.replace(/^```(?:html)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
-    // 혹시 AI가 플레이스홀더를 사용했을 경우 실제 키로 교체
     if (gmapsKey) {
       mapText = mapText.replace(/YOUR_API_KEY/g, gmapsKey);
       mapText = mapText.replace(/key=YOUR_KEY/g, 'key=' + gmapsKey);
     }
-    setProgress(2, 'done');
-
-    // Show results
-    el('progressBox').style.display = 'none';
-
-    el('briefOutput').textContent = briefText;
-    el('briefCard').style.display = 'block';
-
-    el('mapOutput').textContent = mapText.slice(0, 400) + (mapText.length > 400 ? '\n\n... (HTML 생성 완료 — 아래 버튼으로 다운로드)' : '');
+    el('mapOutput').textContent = mapText.slice(0, 400) + (mapText.length > 400 ? '\n\n... (HTML 다운로드 버튼 이용)' : '');
     el('mapCard').style.display = 'block';
-
+    endProgress(true);
   } catch(e) {
-    el('progressBox').style.display = 'none';
-    showError('생성 중 오류가 발생했습니다: ' + e.message);
-  } finally {
-    el('generateBtn').disabled = false;
-    el('generateBtn').textContent = '▷ 브리핑 + 지도 생성';
-    setGenEnabled();
+    endProgress(false);
+    showError('지도 생성 오류: ' + e.message);
   }
 });
 
