@@ -205,6 +205,7 @@
         <div id="leafletMap"></div>
         <div class="map-info" id="mapInfo" style="display:none;"></div>
       </div>
+      <div id="mapDebug" style="display:none;padding:10px 16px;font-size:12px;font-family:'JetBrains Mono',monospace;background:#fffbeb;border-top:1px solid #fde68a;color:#92400e;word-break:break-all;"></div>
     </div>
 
     <!-- Archive -->
@@ -502,6 +503,12 @@ el('generateMapBtn').addEventListener('click', async () => {
     }
     renderMap(mapData);
     el('mapCard').style.display = 'block';
+    // 디버그: 웨이포인트 수 확인
+    const wpCount = (mapData.waypoints || []).length;
+    const ntCount = (mapData.notams || []).length;
+    el('mapDebug').textContent = '웨이포인트: ' + wpCount + '개 | 노탐: ' + ntCount + '개' +
+      (wpCount > 0 ? ' | 첫점: ' + JSON.stringify(mapData.waypoints[0]) : ' | ⚠️ 웨이포인트 없음');
+    el('mapDebug').style.display = 'block';
   } catch(e) { showError('지도 생성 오류: ' + e.message + ' (JSON 파싱 실패일 수 있어요)'); }
   finally { endProgress(); }
 });
